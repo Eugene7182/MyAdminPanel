@@ -5,6 +5,7 @@ import pytest
 from app.core.security import create_access_token
 from app.models.user import UserRole
 from app.tests.utils.simple_client import AsyncClient
+from app.utils.errors import ErrorCodes
 
 
 async def auth_headers(email: str, role: UserRole) -> dict[str, str]:
@@ -40,6 +41,10 @@ async def test_list_products_pagination(client: AsyncClient, seeded_admin):
     data = response.json()
     assert data["size"] == 2
     assert data["total"] >= 5
+    assert data["page"] == 1
+    assert data["sort"] == {"by": "id", "order": "asc"}
+    assert data["next_offset"] == 2
+    assert data["prev_offset"] is None
 
 
 @pytest.mark.asyncio
@@ -54,7 +59,9 @@ async def test_filter_by_title(client: AsyncClient, seeded_admin):
         headers=await auth_headers("admin@test.kz", UserRole.admin),
     )
     assert response.status_code == 200
-    assert any(item["title"] == "Filterable" for item in response.json()["items"])
+    body = response.json()
+    assert body["filters_applied"]["title_contains"] == "Filter"
+    assert any(item["title"] == "Filterable" for item in body["items"])
 
 
 @pytest.mark.asyncio
@@ -133,7 +140,50 @@ async def test_bool_filter(client: AsyncClient, seeded_admin):
         headers=await auth_headers("admin@test.kz", UserRole.admin),
     )
     assert response.status_code == 200
-    assert all(item["in_stock"] for item in response.json()["items"])
+    body = response.json()
+    assert body["filters_applied"]["in_stock"] is True
+    assert all(item["in_stock"] for item in body["items"])
+
+
+@pytest.mark.asyncio
+async def test_offset_pagination(client: AsyncClient, seeded_admin):
+    for i in range(3):
+        await client.post(
+            "/api/v1/products/",
+            json={"title": f"Offset {i}", "price": "7.00", "in_stock": True},
+            headers=await auth_headers("admin@test.kz", UserRole.admin),
+        )
+    response = await client.get(
+        "/api/v1/products/?limit=1&offset=1&sort_by=id&sort_order=asc",
+        headers=await auth_headers("admin@test.kz", UserRole.admin),
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["page"] == 2
+    assert payload["size"] == 1
+    assert payload["prev_offset"] == 0
+    assert payload["next_offset"] == 2 or payload["next_offset"] is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_mix_pagination_params(client: AsyncClient, seeded_admin):
+    response = await client.get(
+        "/api/v1/products/?page=1&limit=5",
+        headers=await auth_headers("admin@test.kz", UserRole.admin),
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["detail"]["error_code"] == ErrorCodes.VALIDATION_ERROR
+
+
+@pytest.mark.asyncio
+async def test_invalid_sort_field(client: AsyncClient, seeded_admin):
+    response = await client.get(
+        "/api/v1/products/?sort_by=unknown",
+        headers=await auth_headers("admin@test.kz", UserRole.admin),
+    )
+    assert response.status_code == 400
+    assert response.json()["detail"]["error_code"] == ErrorCodes.VALIDATION_ERROR
 
 
 @pytest.mark.asyncio

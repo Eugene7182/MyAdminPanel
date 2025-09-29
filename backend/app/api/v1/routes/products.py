@@ -17,8 +17,10 @@ router = APIRouter()
 
 @router.get("/", response_model=PaginatedProducts, summary="Получить список товаров с фильтрами")
 async def list_products(
-    page: int = Query(1, ge=1, description="Номер страницы"),
-    size: int = Query(20, ge=1, le=100, description="Размер страницы"),
+    page: int | None = Query(None, ge=1, description="Номер страницы"),
+    size: int | None = Query(None, ge=1, le=200, description="Размер страницы"),
+    limit: int | None = Query(None, ge=1, le=200, description="Количество записей для offset-пагинации"),
+    offset: int | None = Query(None, ge=0, description="Смещение записей для offset-пагинации"),
     sort_by: str = Query("id", description="Поле сортировки"),
     sort_order: str = Query("asc", pattern="^(asc|desc)$", description="Порядок сортировки"),
     title_contains: str | None = Query(None, description="Фильтр по части названия"),
@@ -47,7 +49,19 @@ async def list_products(
         filters["created_from"] = created_from
     if created_to:
         filters["created_to"] = created_to
-    return await product_service.list_products(db, page, size, sort_by, sort_order, filters)
+    pagination_params = product_service.prepare_pagination_params(
+        page=page,
+        size=size,
+        limit=limit,
+        offset=offset,
+    )
+    return await product_service.list_products(
+        db=db,
+        pagination=pagination_params,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        filters=filters,
+    )
 
 
 @router.post("/", response_model=ProductRead, status_code=status.HTTP_201_CREATED)
