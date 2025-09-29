@@ -14,11 +14,11 @@ app = FastAPI(title="Admin Panel Mock Backend API")
 
 # Define allowed origins for CORS (Cross-Origin Resource Sharing)
 # MUST include '*' for development, or the specific address where the React app runs.
+# Allowed CORS origins ограничены доменами фронтенда для корректной работы cookies
 origins = [
     "http://localhost",
     "http://localhost:3000",  # Common React development port
     "http://localhost:8080",
-    "*"  # Allowing all origins for simple testing/Canvas environment
 ]
 
 # Adding CORS middleware

@@ -3,3 +3,4 @@ uvicorn
 pydantic
 python-jose[jwt]
 asyncio
+python-multipart
