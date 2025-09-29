@@ -1,8 +1,9 @@
+import os
 import time
 import json
 from typing import List, Optional, Dict, Any
 
-from fastapi import FastAPI, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Form
+from fastapi import FastAPI, APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel
@@ -11,6 +12,15 @@ from pydantic import BaseModel
 
 # Initializing the FastAPI application
 app = FastAPI(title="Admin Panel Mock Backend API")
+
+# API version prefix
+API_PREFIX = "/api/v1"
+
+# Main API router with version prefix
+api_router = APIRouter(prefix=API_PREFIX)
+
+# Application metadata
+APP_VERSION = os.getenv("APP_VERSION", "0.1.0")
 
 # Define allowed origins for CORS (Cross-Origin Resource Sharing)
 # MUST include '*' for development, or the specific address where the React app runs.
@@ -31,7 +41,7 @@ app.add_middleware(
 )
 
 # Dummy OAuth2 security scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{API_PREFIX}/auth/token")
 
 # --- Dummy Data Structures (Simulating a Database) ---
 
@@ -80,6 +90,22 @@ mock_products: Dict[int, Product] = {
     4: Product(id=4, sku="EL-1002", name="Monitor 4K", description="27 inch monitor", price=350.00, is_active=True, category_id=1, tag_ids=[]),
     5: Product(id=5, sku="CL-206", name="Jeans Slim", description="Blue denim", price=110.00, is_active=True, category_id=2, tag_ids=[101]),
 }
+
+# --- Platform Metadata Endpoints ---
+
+@api_router.get("/health")
+def health_check() -> Dict[str, str]:
+    """Возвращает статус здоровья сервиса для мониторинга."""
+
+    return {"status": "ok"}
+
+
+@api_router.get("/version")
+def version_info() -> Dict[str, str]:
+    """Возвращает текущую версию (build) развернутого сервиса."""
+
+    return {"version": APP_VERSION}
+
 
 # --- Utility Functions ---
 
@@ -167,7 +193,7 @@ def mock_get_current_user(token: str = Depends(oauth2_scheme)):
 
 # --- Endpoint Handlers ---
 
-@app.post("/auth/token")
+@api_router.post("/auth/token")
 async def login_for_access_token(username: str = Form(...), password: str = Form(...)):
     """Handles user login and returns a mock JWT token."""
     # Simple check: any non-empty user/pass works for the mock
@@ -184,14 +210,14 @@ async def login_for_access_token(username: str = Form(...), password: str = Form
     return {"access_token": mock_jwt, "token_type": "bearer"}
 
 
-@app.get("/auth/permissions/me", response_model=UserPermissions)
+@api_router.get("/auth/permissions/me", response_model=UserPermissions)
 def get_user_permissions(current_user: dict = Depends(mock_get_current_user)):
     """V5.1: Returns mock permissions for the logged-in user."""
     # Mock permissions: full CRUD access for the admin user
     return UserPermissions(permissions=["create", "read", "update", "delete"])
 
 
-@app.get("/products/", response_model=List[ProductResponse])
+@api_router.get("/products/", response_model=List[ProductResponse])
 def read_products(
     skip: int = 0, 
     limit: int = 100,
@@ -211,7 +237,7 @@ def read_products(
     products_response = [get_product_response(p) for p in products_list]
     return products_response[skip: skip + limit]
 
-@app.get("/categories/", response_model=List[Category])
+@api_router.get("/categories/", response_model=List[Category])
 def read_categories(
     skip: int = 0, 
     limit: int = 100,
@@ -275,7 +301,7 @@ async def simulate_db_change(user_id: str, entity: str):
     )
 
 # WebSocket endpoint
-@app.websocket("/ws/{user_id}")
+@api_router.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """Handles WebSocket connections for real-time updates for a specific user."""
     await manager.connect(websocket, user_id)
@@ -297,12 +323,16 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
 # --- Mock CRUD operations (to simulate changes that trigger WS) ---
 # NOTE: These endpoints are simplified and do not fully implement error handling or validation
 
-@app.delete("/products/{product_id}")
+@api_router.delete("/products/{product_id}")
 async def delete_product(product_id: int, current_user: dict = Depends(mock_get_current_user)):
     if product_id not in mock_products:
         raise HTTPException(status_code=404, detail="Product not found")
     del mock_products[product_id]
-    
+
     # Simulate a successful response and trigger WS update
     await simulate_db_change(current_user["sub"], "products")
     return {"message": "Product deleted successfully"}
+
+
+# Register the API router with the FastAPI application
+app.include_router(api_router)
