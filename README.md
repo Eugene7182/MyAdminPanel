@@ -34,7 +34,7 @@
   ENABLE_MESSAGES=false
   ```
 - Новые миграции: `alembic revision -m "message" --autogenerate` и `alembic upgrade head`.
-- Сиды: `python -m app.db.seed` добавит 200 товаров и admin-аккаунт.
+- Сиды: `python -m app.db.seed` добавит 250 детерминированных товаров и admin-аккаунт. Подробнее в [docs/manual-product-testing.md](docs/manual-product-testing.md).
 
 ## 🔐 Аутентификация и RBAC
 - JWT access (15 минут) + refresh (7 дней).
