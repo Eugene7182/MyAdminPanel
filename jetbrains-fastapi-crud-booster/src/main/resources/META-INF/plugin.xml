@@ -1,0 +1,20 @@
+<idea-plugin>
+    <id>com.oppo.fastapicrudbooster</id>
+    <name>FastAPI CRUD Booster</name>
+    <vendor email="data.platform@oppo.kz" url="https://oppo.kz">OPPO KZ Data Platform</vendor>
+    <description><![CDATA[
+        <p>Wizard-driven FastAPI CRUD scaffolding for OPPO KZ Data Platform.</p>
+    ]]></description>
+    <depends>com.intellij.modules.platform</depends>
+    <depends optional="true">com.intellij.modules.python</depends>
+
+    <actions>
+        <action
+                id="com.oppo.fastapicrudbooster.actions.GenerateFastApiCrudModuleAction"
+                class="com.oppo.fastapicrudbooster.actions.GenerateFastApiCrudModuleAction"
+                text="Generate FastAPI CRUD Module"
+                description="Generate a CRUD module for FastAPI with SQLAlchemy and Pydantic">
+            <add-to-group group-id="NewGroup" anchor="first"/>
+        </action>
+    </actions>
+</idea-plugin>
