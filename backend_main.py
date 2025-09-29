@@ -111,7 +111,10 @@ def apply_filters(items: List[Any], entity: str, filter_strings: List[str]) -> L
             # Determine the correct type for comparison
             # Note: This is a simplified type check based on the field name
             if field in ['price']:
-                value = float(value_str)
+                try:
+                    value = float(value_str)
+                except ValueError:
+                    continue # Skip filter if value is not convertible to float
             elif field in ['is_active']:
                 value = value_str.lower() == 'true'
             else:
@@ -135,7 +138,7 @@ def apply_filters(items: List[Any], entity: str, filter_strings: List[str]) -> L
                     passes_all_filters = False
             elif operator == 'contains':
                 # Simplified case-insensitive string contains check
-                if not (isinstance(item_value, str) and value.lower() in item_value.lower()):
+                if not (isinstance(item_value, str) and isinstance(value, str) and value.lower() in item_value.lower()):
                     passes_all_filters = False
             
             if not passes_all_filters:
@@ -251,8 +254,15 @@ class ConnectionManager:
     async def broadcast(self, user_id: str, message: Dict[str, str]):
         """Sends a message to all active sessions of a specific user."""
         if user_id in self.active_connections:
-            for connection in self.active_connections[user_id]:
-                await connection.send_json(message)
+            # Create a list of connections to avoid issues during iteration if one connection fails
+            active_websockets = list(self.active_connections[user_id]) 
+            for connection in active_websockets:
+                try:
+                    await connection.send_json(message)
+                except Exception as e:
+                    print(f"Error sending message to {user_id}: {e}")
+                    # Remove connection if sending failed
+                    self.disconnect(connection, user_id) 
                 
 manager = ConnectionManager()
 
