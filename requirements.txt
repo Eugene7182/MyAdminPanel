@@ -1,5 +1,2 @@
-fastapi
-uvicorn
-pydantic
-python-jose[jwt]
-python-multipart
+# Aggregated tooling for convenience
+-r backend/requirements.txt
