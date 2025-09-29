@@ -36,8 +36,17 @@ class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+class SortMeta(BaseModel):
+    by: str
+    order: str
+
+
 class PaginatedProducts(BaseModel):
     total: int
     page: int
     size: int
+    sort: SortMeta
+    filters_applied: dict[str, object]
+    next_offset: int | None
+    prev_offset: int | None
     items: list[ProductRead]

@@ -1,18 +1,82 @@
 """Product service layer with filtering and pagination."""
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any, Dict, Iterable, Literal
 
+from fastapi import status
 from sqlalchemy import and_, asc, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.routes.websocket import broadcast_product_event
 from app.models.product import Product
 from app.schemas.product import PaginatedProducts, ProductCreate, ProductRead, ProductUpdate
-from app.utils.errors import ErrorCodes, not_found
+from app.utils.errors import ErrorCodes, http_error, not_found
 
 FILTERABLE_FIELDS = {"title", "price", "in_stock", "created_at"}
 SORTABLE_FIELDS = {"id", "title", "price", "created_at"}
+
+
+@dataclass(frozen=True)
+class PaginationParams:
+    """Container for unified pagination parameters."""
+
+    offset: int
+    limit: int
+    page: int
+    size: int
+    mode: Literal["page", "offset"]
+
+
+DEFAULT_PAGE = 1
+DEFAULT_SIZE = 20
+
+
+def prepare_pagination_params(
+    *,
+    page: int | None,
+    size: int | None,
+    limit: int | None,
+    offset: int | None,
+) -> PaginationParams:
+    """Validate and normalize pagination query parameters."""
+
+    use_offset = limit is not None or offset is not None
+    if use_offset and (page is not None or size is not None):
+        raise http_error(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCodes.VALIDATION_ERROR,
+            "Нельзя одновременно использовать page/size и limit/offset",
+        )
+
+    if use_offset:
+        if limit is None:
+            raise http_error(
+                status.HTTP_400_BAD_REQUEST,
+                ErrorCodes.VALIDATION_ERROR,
+                "Параметр limit обязателен при использовании offset-пагинации",
+            )
+        normalized_offset = offset or 0
+        normalized_limit = limit
+        normalized_page = normalized_offset // normalized_limit + 1
+        return PaginationParams(
+            offset=normalized_offset,
+            limit=normalized_limit,
+            page=normalized_page,
+            size=normalized_limit,
+            mode="offset",
+        )
+
+    normalized_page = page or DEFAULT_PAGE
+    normalized_size = size or DEFAULT_SIZE
+    return PaginationParams(
+        offset=(normalized_page - 1) * normalized_size,
+        limit=normalized_size,
+        page=normalized_page,
+        size=normalized_size,
+        mode="page",
+    )
 
 
 def build_filters(params: Dict[str, Any]) -> Iterable[Any]:
@@ -37,10 +101,25 @@ def build_filters(params: Dict[str, Any]) -> Iterable[Any]:
     return expressions
 
 
+def _serialize_filters(filters: Dict[str, Any]) -> Dict[str, Any]:
+    """Prepare filters for JSON serialization in API responses."""
+
+    def _serialize_value(value: Any) -> Any:
+        if isinstance(value, tuple):
+            return [_serialize_value(v) for v in value]
+        if isinstance(value, list):
+            return [_serialize_value(v) for v in value]
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+    return {key: _serialize_value(value) for key, value in filters.items()}
+
+
 async def list_products(
+    *,
     db: AsyncSession,
-    page: int,
-    size: int,
+    pagination: PaginationParams,
     sort_by: str,
     sort_order: str,
     filters: Dict[str, Any],
@@ -49,10 +128,17 @@ async def list_products(
     stmt = select(Product)
     if statements:
         stmt = stmt.where(and_(*statements))
-    if sort_by in SORTABLE_FIELDS:
-        order_column = getattr(Product, sort_by)
-        stmt = stmt.order_by(asc(order_column) if sort_order == "asc" else desc(order_column))
-    stmt = stmt.offset((page - 1) * size).limit(size)
+
+    if sort_by not in SORTABLE_FIELDS:
+        raise http_error(
+            status.HTTP_400_BAD_REQUEST,
+            ErrorCodes.VALIDATION_ERROR,
+            "Недопустимое поле сортировки",
+        )
+
+    order_column = getattr(Product, sort_by)
+    stmt = stmt.order_by(asc(order_column) if sort_order == "asc" else desc(order_column))
+    stmt = stmt.offset(pagination.offset).limit(pagination.limit)
     result = await db.execute(stmt)
     items = result.scalars().all()
 
@@ -60,10 +146,25 @@ async def list_products(
     if statements:
         count_stmt = count_stmt.where(and_(*statements))
     total = (await db.execute(count_stmt)).scalar_one()
+
+    next_offset = pagination.offset + pagination.limit
+    if next_offset >= total:
+        next_offset = None
+
+    prev_offset = pagination.offset - pagination.limit
+    if prev_offset < 0:
+        prev_offset = None if pagination.offset == 0 else 0
+
+    filters_applied = _serialize_filters(filters)
+
     return PaginatedProducts(
         total=total,
-        page=page,
-        size=size,
+        page=pagination.page,
+        size=pagination.size,
+        sort={"by": sort_by, "order": sort_order},
+        filters_applied=filters_applied,
+        next_offset=next_offset,
+        prev_offset=prev_offset,
         items=[ProductRead.model_validate(item) for item in items],
     )
 
