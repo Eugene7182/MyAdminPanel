@@ -2,10 +2,69 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Zap, Trash2, LogOut, Loader2, User } from 'lucide-react';
 
 // --- Конфигурация API и WS ---
-// Убедитесь, что ваш FastAPI запущен на этом порту (обычно 8000)
-const API_BASE_URL = 'http://127.0.0.1:8000'; 
-// Используем ws:// для WebSocket, так как это локальное HTTP-соединение
-const WS_BASE_URL = 'ws://127.0.0.1:8000'; 
+// Значения читаются из переменных окружения Vite (import.meta.env) или runtime-конфига window.__APP_CONFIG__.
+// Fallback значения подобраны для локальной разработки без .env.
+const DEFAULT_HTTP_BASE_URL = 'http://localhost:8000';
+const DEFAULT_WS_BASE_URL = 'ws://localhost:8000';
+
+const readRuntimeConfig = (key) => {
+  const viteValue = import.meta?.env?.[key];
+  if (typeof viteValue === 'string' && viteValue.trim() !== '') {
+    return viteValue.trim();
+  }
+
+  if (typeof window !== 'undefined' && window.__APP_CONFIG__?.[key]) {
+    const runtimeValue = window.__APP_CONFIG__[key];
+    if (typeof runtimeValue === 'string' && runtimeValue.trim() !== '') {
+      return runtimeValue.trim();
+    }
+  }
+
+  if (typeof process !== 'undefined' && process.env?.[key]) {
+    const nodeValue = process.env[key];
+    if (typeof nodeValue === 'string' && nodeValue.trim() !== '') {
+      return nodeValue.trim();
+    }
+  }
+
+  return undefined;
+};
+
+const normalizeBaseUrl = (value) => {
+  if (!value) {
+    return value;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.toString().replace(/\/+$/, '');
+  } catch (error) {
+    console.warn('Некорректный URL в конфигурации, используется исходное значение.', value, error);
+    return value.replace(/\/+$/, '');
+  }
+};
+
+const deriveWsBaseFromHttp = (httpBaseUrl) => {
+  if (!httpBaseUrl) {
+    return DEFAULT_WS_BASE_URL;
+  }
+
+  try {
+    const url = new URL(httpBaseUrl);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return url.toString().replace(/\/+$/, '');
+  } catch (error) {
+    console.warn('Не удалось преобразовать HTTP URL в WS URL. Используется дефолт.', httpBaseUrl, error);
+    return DEFAULT_WS_BASE_URL;
+  }
+};
+
+const API_BASE_URL = normalizeBaseUrl(readRuntimeConfig('VITE_API_URL')) || normalizeBaseUrl(DEFAULT_HTTP_BASE_URL);
+const WS_BASE_URL = normalizeBaseUrl(readRuntimeConfig('VITE_WS_URL')) || normalizeBaseUrl(deriveWsBaseFromHttp(API_BASE_URL));
+
+const buildApiUrl = (path) => `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+const buildWsUrl = (path) => `${WS_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+
 const MOCK_USER_ID = "admin_user_id"; // ID, который возвращает mock_get_current_user в бэкенде
 
 // --- Контекст для аутентификации (Упрощенный для одного файла) ---
@@ -44,7 +103,7 @@ const useAuth = () => {
       formData.append('username', username);
       formData.append('password', password);
 
-      const response = await fetch(`${API_BASE_URL}/auth/token`, {
+      const response = await fetch(buildApiUrl('/auth/token'), {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -162,7 +221,7 @@ const ProductManager = React.forwardRef(({ token, userId, addNotification }, ref
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${API_BASE_URL}/products/`, {
+      const response = await fetch(buildApiUrl('/products/'), {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -203,7 +262,7 @@ const ProductManager = React.forwardRef(({ token, userId, addNotification }, ref
     addNotification({ message: `Удаление продукта ${productId}...`, type: 'info' });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/products/${productId}`, {
+      const response = await fetch(buildApiUrl(`/products/${productId}`), {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -336,7 +395,7 @@ const useWebSocket = (userId, token, fetchCallback, addNotification) => {
 
     const connect = () => {
         // Убедитесь, что ws-адрес соответствует userId
-        ws = new WebSocket(`${WS_BASE_URL}/ws/${userId}`);
+        ws = new WebSocket(buildWsUrl(`/ws/${userId}`));
         
         ws.onopen = () => {
             console.log(`WebSocket: Connected for user ${userId}`);
